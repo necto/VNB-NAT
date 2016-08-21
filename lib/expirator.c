@@ -1,6 +1,6 @@
 #include <assert.h>
 #include "containers/double-chain.h"
-#include "flowtable.h"
+#include "containers/double-map.h"
 #include "coherence.h"
 #include "expirator.h"
 
