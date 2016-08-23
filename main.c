@@ -120,7 +120,7 @@ static struct lcore_params lcore_params_array_default[] = {
 
 static struct lcore_params * lcore_params = lcore_params_array_default;
 static uint16_t nb_lcore_params = sizeof(lcore_params_array_default) /
-				sizeof(lcore_params_array_default[0]);
+  sizeof(lcore_params_array_default[0]);
 
 static struct rte_eth_conf port_conf = {
 	.rxmode = {
@@ -262,8 +262,8 @@ main_loop(__attribute__((unused)) void *dummy)
 		portid = qconf->rx_queue_list[i].port_id;
 		queueid = qconf->rx_queue_list[i].queue_id;
 		RTE_LOG(INFO, NAT,
-			" -- lcoreid=%u portid=%hhu rxqueueid=%hhu\n",
-			lcore_id, portid, queueid);
+            " -- lcoreid=%u portid=%hhu rxqueueid=%hhu\n",
+            lcore_id, portid, queueid);
 	}
 
 	while (!force_quit) {
@@ -280,8 +280,8 @@ main_loop(__attribute__((unused)) void *dummy)
 				if (qconf->tx_mbufs[portid].len == 0)
 					continue;
 				send_burst(qconf,
-					qconf->tx_mbufs[portid].len,
-					portid);
+                   qconf->tx_mbufs[portid].len,
+                   portid);
 				qconf->tx_mbufs[portid].len = 0;
 			}
 
@@ -323,9 +323,9 @@ check_lcore_params(void)
 			return -1;
 		}
 		if ((socketid = rte_lcore_to_socket_id(lcore) != 0) &&
-			(numa_on == 0)) {
+        (numa_on == 0)) {
 			printf("warning: lcore %hhu is on socket %d with numa off \n",
-				lcore, socketid);
+             lcore, socketid);
 		}
 	}
 	return 0;
@@ -363,8 +363,8 @@ get_port_n_rx_queues(const uint8_t port)
 				queue = lcore_params[i].queue_id;
 			else
 				rte_exit(EXIT_FAILURE, "queue ids of the port %d must be"
-						" in sequence and must start with 0\n",
-						lcore_params[i].port_id);
+                 " in sequence and must start with 0\n",
+                 lcore_params[i].port_id);
 		}
 	}
 	return (uint8_t)(++queue);
@@ -381,7 +381,7 @@ init_lcore_rx_queues(void)
 		nb_rx_queue = lcore_conf[lcore].n_rx_queue;
 		if (nb_rx_queue >= MAX_RX_QUEUE_PER_LCORE) {
 			printf("error: too many queues (%u) for lcore: %u\n",
-				(unsigned)nb_rx_queue + 1, (unsigned)lcore);
+             (unsigned)nb_rx_queue + 1, (unsigned)lcore);
 			return -1;
 		} else {
 			lcore_conf[lcore].rx_queue_list[nb_rx_queue].port_id =
@@ -433,17 +433,17 @@ parse_eth_dest(const char *optarg)
 	portid = strtoul(optarg, &port_end, 10);
 	if (errno != 0 || port_end == optarg || *port_end++ != ',')
 		rte_exit(EXIT_FAILURE,
-		"Invalid eth-dest: %s", optarg);
+             "Invalid eth-dest: %s", optarg);
 	if (portid >= RTE_MAX_ETHPORTS)
 		rte_exit(EXIT_FAILURE,
-		"eth-dest: port %d >= RTE_MAX_ETHPORTS(%d)\n",
-		portid, RTE_MAX_ETHPORTS);
+             "eth-dest: port %d >= RTE_MAX_ETHPORTS(%d)\n",
+             portid, RTE_MAX_ETHPORTS);
 
 	if (cmdline_parse_etheraddr(NULL, port_end,
-		&peer_addr, sizeof(peer_addr)) < 0)
+                              &peer_addr, sizeof(peer_addr)) < 0)
 		rte_exit(EXIT_FAILURE,
-		"Invalid ethernet address: %s\n",
-		port_end);
+             "Invalid ethernet address: %s\n",
+             port_end);
 	dest = (uint8_t *)&dest_eth_addr[portid];
 	for (c = 0; c < 6; c++)
 		dest[c] = peer_addr[c];
@@ -460,12 +460,12 @@ parse_eth_dest(const char *optarg)
  * RTE_MAX is used to ensure that NB_MBUF never goes below a minimum
  * value of 8192
  */
-#define NB_MBUF RTE_MAX(	\
-	(nb_ports*nb_rx_queue*RTE_TEST_RX_DESC_DEFAULT +	\
-	nb_ports*nb_lcores*MAX_PKT_BURST +			\
-	nb_ports*n_tx_queue*RTE_TEST_TX_DESC_DEFAULT +		\
-	nb_lcores*MEMPOOL_CACHE_SIZE),				\
-	(unsigned)8192)
+#define NB_MBUF RTE_MAX(                                                \
+                        (nb_ports*nb_rx_queue*RTE_TEST_RX_DESC_DEFAULT + \
+                         nb_ports*nb_lcores*MAX_PKT_BURST +             \
+                         nb_ports*n_tx_queue*RTE_TEST_TX_DESC_DEFAULT + \
+                         nb_lcores*MEMPOOL_CACHE_SIZE),                 \
+                        (unsigned)8192)
 
 /* Parse the argument given in the command line of the application */
 static int
@@ -483,10 +483,10 @@ parse_args(int argc, char **argv)
 	argvopt = argv;
 
 	while ((opt = getopt_long(argc, argvopt, "p",
-				lgopts, &option_index)) != EOF) {
+                            lgopts, &option_index)) != EOF) {
 
 		switch (opt) {
-		/* portmask */
+      /* portmask */
 		case 'p':
 			enabled_port_mask = parse_portmask(optarg);
 			if (enabled_port_mask == 0) {
@@ -496,12 +496,12 @@ parse_args(int argc, char **argv)
 			}
 			break;
 
-		/* long options */
+      /* long options */
 		case 0:
 			if (!strncmp(lgopts[option_index].name,
-					CMD_LINE_OPT_ETH_DEST,
-					sizeof(CMD_LINE_OPT_ETH_DEST))) {
-					parse_eth_dest(optarg);
+                   CMD_LINE_OPT_ETH_DEST,
+                   sizeof(CMD_LINE_OPT_ETH_DEST))) {
+        parse_eth_dest(optarg);
 			}
 
 			break;
@@ -554,15 +554,15 @@ init_mem(unsigned nb_mbuf)
 			snprintf(s, sizeof(s), "mbuf_pool_%d", socketid);
 			pktmbuf_pool[socketid] =
 				rte_pktmbuf_pool_create(s, nb_mbuf,
-					MEMPOOL_CACHE_SIZE, 0,
-					RTE_MBUF_DEFAULT_BUF_SIZE, socketid);
+                                MEMPOOL_CACHE_SIZE, 0,
+                                RTE_MBUF_DEFAULT_BUF_SIZE, socketid);
 			if (pktmbuf_pool[socketid] == NULL)
 				rte_exit(EXIT_FAILURE,
-					"Cannot init mbuf pool on socket %d\n",
-					socketid);
+                 "Cannot init mbuf pool on socket %d\n",
+                 socketid);
 			else
 				printf("Allocated mbuf pool on socket %d\n",
-					socketid);
+               socketid);
 		}
 	}
 	return 0;
@@ -733,7 +733,7 @@ main(int argc, char **argv)
 
 			if (numa_on)
 				socketid =
-				(uint8_t)rte_lcore_to_socket_id(lcore_id);
+          (uint8_t)rte_lcore_to_socket_id(lcore_id);
 			else
 				socketid = 0;
 
