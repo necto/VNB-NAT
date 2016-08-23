@@ -44,6 +44,7 @@
 
 #include <cmdline_parse.h>
 #include <cmdline_parse_etheraddr.h>
+#include <cmdline_parse_ipaddr.h>
 
 #include "lib/containers/double-map.h"
 #include "lib/containers/double-chain.h"
@@ -102,8 +103,30 @@ volatile bool force_quit;
 uint64_t dest_eth_addr[RTE_MAX_ETHPORTS];
 struct ether_addr ports_eth_addr[RTE_MAX_ETHPORTS];
 
-/* mask of enabled ports */
-uint32_t enabled_port_mask;
+static struct cmdline_args {
+  /* The WAN port */
+  uint8_t wan_port_id;
+
+  /* The NAT's external IP address. should be provided as a command line option */
+  uint32_t external_ip;
+
+  /* The expiration time. after this number of seconds of
+     inactivity the flows will be removed from the table. */
+  uint32_t expiration_time;//seconds
+
+  /* The maximum number of flows that may be kept simultaneously in
+     the flow table. If more flows arrived, the most recent ones
+     will be discarded. */
+  int max_flows;
+
+  /* The least port on the external device to be allocated for new flows.
+     The ports will be allocated within the range
+     [start_port, start_port+max_flows] */
+  int start_port;
+
+  /* mask of enabled ports */
+  uint32_t enabled_port_mask;
+} cmdline_args = {0,IPv4(11,3,168,192), 10, 1024, 1025, 0};
 
 struct lcore_conf lcore_conf[RTE_MAX_LCORE];
 
@@ -339,7 +362,7 @@ check_port_config(const unsigned nb_ports)
 
 	for (i = 0; i < nb_lcore_params; ++i) {
 		portid = lcore_params[i].port_id;
-		if ((enabled_port_mask & (1 << portid)) == 0) {
+		if ((cmdline_args.enabled_port_mask & (1 << portid)) == 0) {
 			printf("port %u is not enabled in port mask\n", portid);
 			return -1;
 		}
@@ -449,9 +472,27 @@ parse_eth_dest(const char *optarg)
 		dest[c] = peer_addr[c];
 }
 
+static void
+parse_external_addr(const char *optarg)
+{
+  struct cmdline_ipaddr res;
+  struct cmdline_token_ipaddr tk;
+  tk.ipaddr_data.flags = CMDLINE_IPADDR_V4;
+  if (cmdline_parse_ipaddr((cmdline_parse_token_hdr_t*)&tk,
+                           optarg, &res, sizeof(res)) < 0) {
+    rte_exit(EXIT_FAILURE, "Invalid external IP address: %s\n", optarg);
+  }
+  cmdline_args.external_ip = res.addr.ipv4.s_addr;
+}
+
 #define MEMPOOL_CACHE_SIZE 256
 
+#define CMD_LINE_OPT_WAN_PORT "wan"
 #define CMD_LINE_OPT_ETH_DEST "eth-dest"
+#define CMD_LINE_OPT_EXT_IP "extip"
+#define CMD_LINE_OPT_EXP_TIME "expire"
+#define CMD_LINE_OPT_MAX_FLOWS "max-flows"
+#define CMD_LINE_OPT_START_PORT "starting-port"
 
 /*
  * This expression is used to calculate the number of mbufs needed
@@ -469,55 +510,104 @@ parse_eth_dest(const char *optarg)
 
 /* Parse the argument given in the command line of the application */
 static int
-parse_args(int argc, char **argv)
+parse_args(int argc, char **argv, unsigned nb_ports)
 {
-	int opt, ret;
-	char **argvopt;
-	int option_index;
-	char *prgname = argv[0];
-	static struct option lgopts[] = {
-		{CMD_LINE_OPT_ETH_DEST, 1, 0, 0},
-		{NULL, 0, 0, 0}
-	};
+  int opt, ret;
+  char **argvopt;
+  int option_index;
+  char *prgname = argv[0];
+  char *port_end;
+  static struct option lgopts[] = {
+    {CMD_LINE_OPT_WAN_PORT, 1, 0, 0},
+    {CMD_LINE_OPT_ETH_DEST, 1, 0, 0},
+    {CMD_LINE_OPT_EXT_IP, 1, 0, 0},
+    {CMD_LINE_OPT_EXP_TIME, 1, 0, 0},
+    {CMD_LINE_OPT_MAX_FLOWS, 1, 0, 0},
+    {CMD_LINE_OPT_START_PORT, 1, 0, 0},
+    {NULL, 0, 0, 0}
+  };
 
-	argvopt = argv;
+  argvopt = argv;
 
-	while ((opt = getopt_long(argc, argvopt, "p",
+  while ((opt = getopt_long(argc, argvopt, "p:P",
                             lgopts, &option_index)) != EOF) {
+    if (opt == 'p') {
+      cmdline_args.enabled_port_mask = parse_portmask(optarg);
+      if (cmdline_args.enabled_port_mask == 0) {
+        printf("invalid portmask\n");
+        print_usage(prgname);
+        return -1;
+      }
+    } else if (0 == strncmp(lgopts[option_index].name,
+                            CMD_LINE_OPT_WAN_PORT,
+                            sizeof (CMD_LINE_OPT_WAN_PORT))) {
+      RTE_LOG(INFO, NAT, "parsing wan port: %s\n", optarg);
+      cmdline_args.wan_port_id = (uint8_t)strtoul(optarg, &port_end, 10);
+      if ((optarg[0] == '\0') || (port_end == NULL) || (*port_end != '\0'))
+        return -1;
+      if (cmdline_args.wan_port_id >= nb_ports) {
+        printf("WAN port does not exist.");
+        return -1;
+      }
+      if ((cmdline_args.enabled_port_mask & 1 << cmdline_args.wan_port_id) == 0) {
+        printf("WAN port is not enabled");
+        return -1;
+      }
+    } else if (0 == strncmp(lgopts[option_index].name, CMD_LINE_OPT_ETH_DEST,
+                            sizeof(CMD_LINE_OPT_ETH_DEST))) {
+      RTE_LOG(INFO, NAT, "parsing gateway MAC: %s\n", optarg);
+      parse_eth_dest(optarg);
+    } else if (0 == strncmp(lgopts[option_index].name, CMD_LINE_OPT_EXT_IP,
+                            sizeof(CMD_LINE_OPT_EXT_IP))) {
+      RTE_LOG(INFO, NAT,
+              "parsing IP adddres on the external interface: %s\n", optarg);
+      parse_external_addr(optarg);
+    } else if (0 == strncmp(lgopts[option_index].name,
+                            CMD_LINE_OPT_EXP_TIME,
+                            sizeof (CMD_LINE_OPT_EXP_TIME))) {
+      RTE_LOG(INFO, NAT, "parsing expiration time: %s\n", optarg);
+      cmdline_args.expiration_time = (uint32_t)strtoul(optarg, &port_end, 10);
+      if ((optarg[0] == '\0') || (port_end == NULL) || (*port_end != '\0'))
+        return -1;
+      if (cmdline_args.expiration_time == 0) {
+        printf("expiration time must be positive.");
+        return -1;
+      }
+    } else if (0 == strncmp(lgopts[option_index].name,
+                            CMD_LINE_OPT_MAX_FLOWS,
+                            sizeof (CMD_LINE_OPT_MAX_FLOWS))) {
+      RTE_LOG(INFO, NAT, "parsing number of flows bound: %s\n", optarg);
+      cmdline_args.max_flows = (int)strtol(optarg, &port_end, 10);
+      if ((optarg[0] == '\0') || (port_end == NULL) || (*port_end != '\0'))
+        return -1;
+      if (cmdline_args.max_flows <= 0) {
+        printf("number of flows bound must be positive.");
+        return -1;
+      }
+    } else if (0 == strncmp(lgopts[option_index].name,
+                            CMD_LINE_OPT_START_PORT,
+                            sizeof (CMD_LINE_OPT_START_PORT))) {
+      RTE_LOG(INFO, NAT,
+              "parsing the lower bound for the ports allocation: %s\n", optarg);
+      cmdline_args.start_port = (int)strtol(optarg, &port_end, 10);
+      if ((optarg[0] == '\0') || (port_end == NULL) || (*port_end != '\0'))
+        return -1;
+      if (cmdline_args.start_port <= 0) {
+        printf("a port can not be nonpositive.");
+        return -1;
+      }
+    } else {
+      print_usage(prgname);
+      return -1;
+    }
+  }
 
-		switch (opt) {
-      /* portmask */
-		case 'p':
-			enabled_port_mask = parse_portmask(optarg);
-			if (enabled_port_mask == 0) {
-				printf("NAT: Invalid portmask");
-				print_usage(prgname);
-				return -1;
-			}
-			break;
+  if (optind >= 0)
+    argv[optind-1] = prgname;
 
-      /* long options */
-		case 0:
-			if (!strncmp(lgopts[option_index].name,
-                   CMD_LINE_OPT_ETH_DEST,
-                   sizeof(CMD_LINE_OPT_ETH_DEST))) {
-        parse_eth_dest(optarg);
-			}
-
-			break;
-
-		default:
-			print_usage(prgname);
-			return -1;
-		}
-	}
-
-	if (optind >= 0)
-		argv[optind-1] = prgname;
-
-	ret = optind-1;
-	optind = 0; /* reset getopt lib */
-	return ret;
+  ret = optind-1;
+  optind = 0; /* reset getopt lib */
+  return ret;
 }
 
 static void
@@ -667,8 +757,13 @@ main(int argc, char **argv)
 			ETHER_LOCAL_ADMIN_ADDR + ((uint64_t)portid << 40);
 	}
 
+	nb_ports = rte_eth_dev_count();
+	if (nb_ports > RTE_MAX_ETHPORTS)
+		nb_ports = RTE_MAX_ETHPORTS;
+
+
 	/* parse application arguments (after the EAL ones) */
-	ret = parse_args(argc, argv);
+	ret = parse_args(argc, argv, nb_ports);
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "Invalid NAT parameters\n");
 
@@ -679,10 +774,6 @@ main(int argc, char **argv)
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "init_lcore_rx_queues failed\n");
 
-	nb_ports = rte_eth_dev_count();
-	if (nb_ports > RTE_MAX_ETHPORTS)
-		nb_ports = RTE_MAX_ETHPORTS;
-
 	if (check_port_config(nb_ports) < 0)
 		rte_exit(EXIT_FAILURE, "check_port_config failed\n");
 
@@ -691,7 +782,7 @@ main(int argc, char **argv)
 	/* initialize all ports */
 	for (portid = 0; portid < nb_ports; portid++) {
 		/* skip ports that are not enabled */
-		if ((enabled_port_mask & (1 << portid)) == 0) {
+		if ((cmdline_args.enabled_port_mask & (1 << portid)) == 0) {
 			printf("\nSkipping disabled port %d\n", portid);
 			continue;
 		}
@@ -790,7 +881,7 @@ main(int argc, char **argv)
 
 	/* start ports */
 	for (portid = 0; portid < nb_ports; portid++) {
-		if ((enabled_port_mask & (1 << portid)) == 0) {
+		if ((cmdline_args.enabled_port_mask & (1 << portid)) == 0) {
 			continue;
 		}
 		/* Start device */
@@ -812,7 +903,7 @@ main(int argc, char **argv)
 
 	printf("\n");
 
-	check_all_ports_link_status((uint8_t)nb_ports, enabled_port_mask);
+	check_all_ports_link_status((uint8_t)nb_ports, cmdline_args.enabled_port_mask);
 
 	ret = 0;
 	/* launch per-lcore init on every lcore */
@@ -826,7 +917,7 @@ main(int argc, char **argv)
 
 	/* stop ports */
 	for (portid = 0; portid < nb_ports; portid++) {
-		if ((enabled_port_mask & (1 << portid)) == 0)
+		if ((cmdline_args.enabled_port_mask & (1 << portid)) == 0)
 			continue;
 		printf("Closing port %d...", portid);
 		rte_eth_dev_stop(portid);
