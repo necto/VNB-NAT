@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -139,6 +140,7 @@ struct lcore_params {
 static struct lcore_params lcore_params_array_default[] = {
   {0, 0, 0},
   {1, 0, 0},
+  {2, 0, 0},
 };
 
 static struct lcore_params * lcore_params = lcore_params_array_default;
@@ -220,7 +222,11 @@ forward(struct rte_mbuf *m, uint8_t portid, struct lcore_conf *qconf)
 
   eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
 
-  dst_port = 1 - portid;
+  if(portid == 2) {
+    dst_port = 1;
+  } else {
+    dst_port = 2;
+  }
 
   *(uint64_t *)&eth_hdr->d_addr = dest_eth_addr[dst_port];
   send_single_packet(qconf, m, dst_port);
